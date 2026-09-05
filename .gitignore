@@ -1,0 +1,6 @@
+node_modules/
+arteriq.db
+arteriq.db-journal
+arteriq.db-wal
+arteriq.db-shm
+.env
