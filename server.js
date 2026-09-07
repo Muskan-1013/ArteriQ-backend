@@ -14,11 +14,17 @@ const SESSION_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 // --- helpers ---------------------------------------------------------
 
+function findUserByEmail(email) {
+  return db.data.users.find((u) => u.email === email);
+}
+
+function findUserById(id) {
+  return db.data.users.find((u) => u.id === id);
+}
+
 function getSession(token) {
   if (!token) return null;
-  const session = db
-    .prepare("SELECT * FROM sessions WHERE token = ?")
-    .get(token);
+  const session = db.data.sessions.find((s) => s.token === token);
   if (!session) return null;
   if (session.expires_at < Date.now()) return null;
   return session;
@@ -42,8 +48,7 @@ app.post("/signup", (req, res) => {
   if (!auth.isValidPassword(password)) {
     return res.status(400).json({ error: "weakPassword" });
   }
-  const existing = db.prepare("SELECT id FROM users WHERE email = ?").get(email);
-  if (existing) {
+  if (findUserByEmail(email)) {
     return res.status(409).json({ error: "emailTaken" });
   }
 
@@ -52,9 +57,8 @@ app.post("/signup", (req, res) => {
   const id = crypto.randomUUID();
   const createdAt = Date.now();
 
-  db.prepare(
-    "INSERT INTO users (id, name, email, password_hash, salt, created_at) VALUES (?, ?, ?, ?, ?, ?)"
-  ).run(id, name, email, passwordHash, salt, createdAt);
+  db.data.users.push({ id, name, email, passwordHash, salt, createdAt });
+  db.save();
 
   res.json({ id, name, email, createdAt });
 });
@@ -62,19 +66,23 @@ app.post("/signup", (req, res) => {
 // POST /login { email, password } -> { token }
 app.post("/login", (req, res) => {
   const { email, password } = req.body || {};
-  const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
+  const user = findUserByEmail(email);
   if (!user) return res.status(401).json({ error: "invalidCredentials" });
 
   const hash = auth.hashPassword(password, user.salt);
-  if (hash !== user.password_hash) {
+  if (hash !== user.passwordHash) {
     return res.status(401).json({ error: "invalidCredentials" });
   }
 
   const token = auth.generateSessionToken();
   const now = Date.now();
-  db.prepare(
-    "INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)"
-  ).run(token, user.id, now, now + SESSION_LIFETIME_MS);
+  db.data.sessions.push({
+    token,
+    user_id: user.id,
+    created_at: now,
+    expires_at: now + SESSION_LIFETIME_MS,
+  });
+  db.save();
 
   res.json({ token });
 });
@@ -82,7 +90,10 @@ app.post("/login", (req, res) => {
 // POST /logout { token }
 app.post("/logout", (req, res) => {
   const token = getBearerToken(req);
-  if (token) db.prepare("DELETE FROM sessions WHERE token = ?").run(token);
+  if (token) {
+    db.data.sessions = db.data.sessions.filter((s) => s.token !== token);
+    db.save();
+  }
   res.json({ ok: true });
 });
 
@@ -91,9 +102,9 @@ app.get("/me", (req, res) => {
   const token = getBearerToken(req);
   const session = getSession(token);
   if (!session) return res.json(null);
-  const user = db.prepare("SELECT * FROM users WHERE id = ?").get(session.user_id);
+  const user = findUserById(session.user_id);
   if (!user) return res.json(null);
-  res.json({ id: user.id, name: user.name, email: user.email, createdAt: user.created_at });
+  res.json({ id: user.id, name: user.name, email: user.email, createdAt: user.createdAt });
 });
 
 // POST /assess-risk { ...RiskAssessmentInput } -> RiskReport (no auth required)
