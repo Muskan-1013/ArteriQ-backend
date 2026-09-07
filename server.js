@@ -1,10 +1,13 @@
-const express = require("express");
+﻿const express = require("express");
 const cors = require("cors");
 const crypto = require("crypto");
 const db = require("./db");
 const auth = require("./lib/auth");
 const reports = require("./lib/reports");
 const riskAssessment = require("./lib/riskAssessment");
+const multer = require("multer");
+const ultrasound = require("./lib/ultrasound");
+const upload = multer({ storage: multer.memoryStorage() });
 
 const app = express();
 app.use(cors());
@@ -111,6 +114,19 @@ app.get("/me", (req, res) => {
 app.post("/assess-risk", (req, res) => {
   const report = riskAssessment.assessRisk(req.body || {});
   res.json(report);
+});
+
+app.post("/analyze-ultrasound", upload.single("image"), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: "noImageUploaded" });
+  }
+  try {
+    const result = await ultrasound.analyzeUltrasound(req.file.buffer, req.file.originalname);
+    res.json(result);
+  } catch (err) {
+    console.error("Ultrasound analysis failed:", err.message);
+    res.status(502).json({ error: "mlServiceUnavailable" });
+  }
 });
 
 // POST /reports { report } -> saved report (auth required)
